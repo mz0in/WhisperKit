@@ -13,6 +13,32 @@ import Tokenizers
 
 // MARK: - Helpers
 
+extension MLMultiArray {
+    /// Calculate the linear offset by summing the products of each dimension’s index with the dimension’s stride.
+    /// More info [here](https://developer.apple.com/documentation/coreml/mlmultiarray/2879231-subscript)
+    /// - Parameters:
+    ///  - index: The index of the element
+    ///  - strides: The precomputed strides of the multi-array, if not provided, it will be computed. It's a performance optimization to avoid recomputing the strides every time when accessing the multi-array with multiple indexes.
+    @inline(__always)
+    func linearOffset(for index: [NSNumber], strides strideInts: [Int]? = nil) -> Int {
+        var linearOffset = 0
+        let strideInts = strideInts ?? strides.map { $0.intValue }
+        for (dimension, stride) in zip(index, strideInts) {
+            linearOffset += dimension.intValue * stride
+        }
+        return linearOffset
+    }
+
+    func fill<Value>(indexes: [[NSNumber]], with value: Value) {
+        let pointer = UnsafeMutablePointer<Value>(OpaquePointer(dataPointer))
+        let strideInts = strides.map { $0.intValue }
+        for index in indexes {
+            let linearOffset = linearOffset(for: index, strides: strideInts)
+            pointer[linearOffset] = value
+        }
+    }
+}
+
 func initMLMultiArray(shape: [NSNumber], dataType: MLMultiArrayDataType, initialValue: Any) -> MLMultiArray {
     let multiArray = try! MLMultiArray(shape: shape, dataType: dataType)
 
@@ -142,7 +168,8 @@ func detectVariant(logitsDim: Int, encoderDim: Int) -> ModelVariant {
 public func modelSupport(for deviceName: String) -> (default: String, disabled: [String]) {
     switch deviceName {
     case let model where model.hasPrefix("iPhone11"), // A12
-         let model where model.hasPrefix("iPhone12"): // A13
+         let model where model.hasPrefix("iPhone12"), // A13
+         let model where model.hasPrefix("Watch7"): // Series 9 and Ultra 2
         return ("base", ["small", "small.en", "large-v3_turbo", "large-v3", "large-v3_turbo_1307MB", "large-v3_turbo_1049MB", "large-v2", "large-v2_turbo", "large-v2_turbo_1116MB", "large-v2_turbo_1430MB", "large-v2_1161MB", "large-v2_1400MB", "large-v3_1053MB", "large-v2_1382MB"])
 
     case let model where model.hasPrefix("iPhone13"): // A14
@@ -153,14 +180,66 @@ public func modelSupport(for deviceName: String) -> (default: String, disabled: 
          let model where model.hasPrefix("iPhone16"): // A17
         return ("base", ["large-v3_turbo", "large-v3", "large-v2_turbo", "large-v2"])
 
-    // TODO: Disable turbo variants for M1
-    case let model where model.hasPrefix("arm64"): // Mac
-        return ("base", [""])
-
-    // Catch-all for unhandled models or macs
+    // Fall through to macOS checks
     default:
-        return ("base", [""])
+        break
     }
+
+    #if os(macOS)
+        if deviceName.hasPrefix("arm64") {
+            if Process.processor.contains("Apple M1") {
+                // Disable turbo variants for M1
+                return ("base", ["large-v3_turbo", "large-v3_turbo_1049MB", "large-v3_turbo_1307MB", "large-v2_turbo", "large-v2_turbo_1116MB", "large-v2_turbo_1430MB"])
+            } else {
+                // Enable all variants for M2 or M3, none disabled
+                return ("base", [])
+            }
+        }
+    #endif
+
+    // Unhandled device, default to base variant
+    return ("base", [""])
+}
+
+#if os(macOS)
+    // From: https://stackoverflow.com/a/71726663
+    extension Process {
+        static func stringFromTerminal(command: String) -> String {
+            let task = Process()
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.launchPath = "/bin/bash"
+            task.arguments = ["-c", "sysctl -n " + command]
+            task.launch()
+            return String(bytes: pipe.fileHandleForReading.availableData, encoding: .utf8) ?? ""
+        }
+
+        static let processor = stringFromTerminal(command: "machdep.cpu.brand_string")
+        static let cores = stringFromTerminal(command: "machdep.cpu.core_count")
+        static let threads = stringFromTerminal(command: "machdep.cpu.thread_count")
+        static let vendor = stringFromTerminal(command: "machdep.cpu.vendor")
+        static let family = stringFromTerminal(command: "machdep.cpu.family")
+    }
+#endif
+
+public func resolveAbsolutePath(_ inputPath: String) -> String {
+    let fileManager = FileManager.default
+
+    // Expanding tilde if present
+    let pathWithTildeExpanded = NSString(string: inputPath).expandingTildeInPath
+
+    // If the path is already absolute, return it
+    if pathWithTildeExpanded.hasPrefix("/") {
+        return pathWithTildeExpanded
+    }
+
+    // Resolving relative path based on the current working directory
+    if let cwd = fileManager.currentDirectoryPath as String? {
+        let resolvedPath = URL(fileURLWithPath: cwd).appendingPathComponent(pathWithTildeExpanded).path
+        return resolvedPath
+    }
+
+    return inputPath
 }
 
 func loadTokenizer(for pretrained: ModelVariant) async throws -> Tokenizer {
@@ -213,7 +292,6 @@ func saveBuffer(_ buffer: AVAudioPCMBuffer, to url: URL) throws {
     let audioFile = try AVAudioFile(forWriting: url, settings: buffer.format.settings)
     try audioFile.write(from: buffer)
 }
-
 
 func rescale(value: Float, min: Float, max: Float) -> Float {
     return (value - min) / (max - min)

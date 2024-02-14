@@ -5,8 +5,14 @@ import CoreML
 @testable import WhisperKit
 import XCTest
 
-@available(macOS 14, iOS 17, *)
+@available(macOS 14, iOS 17, watchOS 10, visionOS 1, *)
 final class FunctionalTests: XCTestCase {
+    func testInitLarge() async {
+        let modelPath = largev3ModelPath()
+        let whisperKit = try? await WhisperKit(modelFolder: modelPath, logLevel: .error)
+        XCTAssertNotNil(whisperKit)
+    }
+
     func testOutputAll() async throws {
         let modelPaths = allModelPaths()
 
@@ -32,7 +38,7 @@ final class FunctionalTests: XCTestCase {
             )
         }
     }
-    
+
     func testRealTimeFactorTiny() async throws {
         let modelPath = tinyModelPath()
 
@@ -98,7 +104,6 @@ final class FunctionalTests: XCTestCase {
         }
 
         let dispatchSemaphore = DispatchSemaphore(value: 0)
-
 
         Task {
             let pipe = try? await WhisperKit(model: "large-v3")

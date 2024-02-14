@@ -1,30 +1,23 @@
 //  For licensing see accompanying LICENSE.md file.
 //  Copyright © 2024 Argmax, Inc. All rights reserved.
 
-import XCTest
-import CoreML
-@testable import WhisperKit
-import Tokenizers
 import AVFoundation
+import CoreML
+import Tokenizers
+@testable import WhisperKit
+import XCTest
 
-@available(macOS 14, iOS 17, *)
+@available(macOS 14, iOS 17, watchOS 10, visionOS 1, *)
 final class UnitTests: XCTestCase {
-
     func testInit() async {
-        let whisperKit = try? await WhisperKit(prewarm: false, load: false)
+        let whisperKit = try? await WhisperKit(prewarm: false, load: false, download: false)
         XCTAssertNotNil(whisperKit)
     }
 
-    // MARK: - Model Loading Tests
+    // MARK: - Model Loading Test
 
     func testInitTiny() async {
         let modelPath = tinyModelPath()
-        let whisperKit = try? await WhisperKit(modelFolder: modelPath, logLevel: .error)
-        XCTAssertNotNil(whisperKit)
-    }
-
-    func testInitLarge() async {
-        let modelPath = largev3ModelPath()
         let whisperKit = try? await WhisperKit(modelFolder: modelPath, logLevel: .error)
         XCTAssertNotNil(whisperKit)
     }
@@ -90,13 +83,13 @@ final class UnitTests: XCTestCase {
 
     func testLogmelOutput() async {
         let audioSamples = [Float](repeating: 0.0, count: 16000)
-        guard let paddedSamples = AudioProcessor.padOrTrimAudio(fromArray: audioSamples, startAt: 0, toLength: 480000) else {
+        guard let paddedSamples = AudioProcessor.padOrTrimAudio(fromArray: audioSamples, startAt: 0, toLength: 480_000) else {
             XCTFail("Failed to pad audio samples")
             return
         }
         var featureExtractor = FeatureExtractor()
         let modelPath = URL(filePath: tinyModelPath()).appending(path: "MelSpectrogram.mlmodelc")
-        try? await featureExtractor.loadModel(at: modelPath, computeUnits: .all)
+        try? await featureExtractor.loadModel(at: modelPath, computeUnits: ModelComputeOptions().melCompute)
         guard let melSpectrogram = try? await featureExtractor.logMelSpectrogram(fromAudio: paddedSamples) else {
             XCTFail("Failed to produce Mel spectrogram from audio samples")
             return
@@ -117,7 +110,7 @@ final class UnitTests: XCTestCase {
         XCTAssertLessThan(uniqueRatio, repeatedRatio)
         XCTAssertLessThan(repeatedRatio, repeatedLongRatio)
     }
-    
+
     func testCompressionRatioString() {
         let uniqueString = "This is a unique string"
         let uniqueRatio = compressionRatio(of: uniqueString)
@@ -133,10 +126,9 @@ final class UnitTests: XCTestCase {
     // MARK: Encoder Tests
 
     func testEncoderOutput() async {
-
         var audioEncoder = AudioEncoder()
         let modelPath = URL(filePath: tinyModelPath()).appending(path: "AudioEncoder.mlmodelc")
-        try? await audioEncoder.loadModel(at: modelPath, computeUnits: .all)
+        try? await audioEncoder.loadModel(at: modelPath, computeUnits: ModelComputeOptions().audioEncoderCompute)
 
         let encoderInput = try! MLMultiArray(shape: [1, 80, 1, 3000], dataType: .float16)
         let expectedShape: [NSNumber] = [1, 384, 1, 1500]
@@ -152,16 +144,26 @@ final class UnitTests: XCTestCase {
         var textDecoder = TextDecoder()
         let decodingOptions = DecodingOptions()
         let modelPath = URL(filePath: tinyModelPath()).appending(path: "TextDecoder.mlmodelc")
-        try? await textDecoder.loadModel(at: modelPath, computeUnits: .all)
-        textDecoder.tokenizer = try? await loadTokenizer(for: .tiny)
+        do {
+            try await textDecoder.loadModel(at: modelPath, computeUnits: ModelComputeOptions().textDecoderCompute)
+            textDecoder.tokenizer = try await loadTokenizer(for: .tiny)
+        } catch {
+            XCTFail("Failed to load the model/tokenizer \(error)")
+            return
+        }
 
         let tokenSampler = GreedyTokenSampler(temperature: 0, eotToken: textDecoder.tokenizer!.endToken, decodingOptions: decodingOptions)
-        
+
         let encoderInput = try! MLMultiArray(shape: [1, 384, 1, 1500], dataType: .float16)
         let decoderInputs = textDecoder.prepareDecoderInputs(withPrompt: [textDecoder.tokenizer!.startOfTranscriptToken])
-        let expectedShape: Int = 1
+        let expectedShape = 1
 
-        let decoderOutput = try! await textDecoder.decodeText(from: encoderInput, using: decoderInputs, sampler: tokenSampler, options: decodingOptions)
+        guard let inputs = decoderInputs else {
+            XCTFail("Failed to prepare decoder inputs")
+            return
+        }
+
+        let decoderOutput = try! await textDecoder.decodeText(from: encoderInput, using: inputs, sampler: tokenSampler, options: decodingOptions)
         XCTAssertNotNil(decoderOutput, "Failed to decode text")
         XCTAssertEqual(decoderOutput.count, expectedShape, "Decoder output shape is not as expected")
     }
@@ -173,11 +175,11 @@ final class UnitTests: XCTestCase {
         let tokenText = "<|startoftranscript|>"
 
         let textDecoder = TextDecoder()
-        textDecoder.tokenizer = try? await loadTokenizer(for: .tiny)
+        textDecoder.tokenizer = try! await loadTokenizer(for: .tiny)
         let encodedToken = textDecoder.tokenizer!.convertTokenToId(tokenText)!
         let decodedToken = textDecoder.tokenizer!.decode(tokens: [encodedToken])
 
-        textDecoder.tokenizer = try? await loadTokenizer(for: .largev3)
+        textDecoder.tokenizer = try! await loadTokenizer(for: .largev3)
         let encodedTokenLarge = textDecoder.tokenizer!.convertTokenToId(tokenText)!
         let decodedTokenLarge = textDecoder.tokenizer?.decode(tokens: [encodedTokenLarge])
 
@@ -224,7 +226,8 @@ final class UnitTests: XCTestCase {
     }
 
     func testWindowing() async {
-        let whisperKit = try? await WhisperKit(modelFolder: tinyModelPath(), verbose: true, logLevel: .debug)
+        let computeOptions = ModelComputeOptions()
+        let whisperKit = try? await WhisperKit(modelFolder: tinyModelPath(), computeOptions: computeOptions, verbose: true, logLevel: .debug)
 
         guard let audioFilePath = Bundle.module.path(forResource: "jfk", ofType: "wav") else {
             XCTFail("Audio file not found")
@@ -388,7 +391,7 @@ final class UnitTests: XCTestCase {
         // Define options with temperature increment settings
         let initialTemperature: Float = 0
         let temperatureIncrement: Float = 0.1
-        let fallbackCount: Int = 1
+        let fallbackCount = 1
         let options = DecodingOptions(
             temperature: initialTemperature,
             temperatureIncrementOnFallback: temperatureIncrement,
@@ -447,78 +450,179 @@ final class UnitTests: XCTestCase {
         XCTAssertNotEqual(resultFull.segments.first?.start, resultSeek.segments.first?.start, "Segments should have the different start times")
         XCTAssertEqual(resultFull.segments.first?.end, resultSeek.segments.first?.end, "Segments should have the same end time")
     }
+
+    // MARK: - Utils Tests
+
+    func testFillIndexesWithValue() throws {
+        let logits = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        logits.fill(indexes: [], with: -FloatType.infinity)
+        XCTAssertEqual(logits.data(for: 2), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+
+        let logits2 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let indexes2: [[NSNumber]] = [[0, 0, 0], [0, 0, 1], [0, 0, 5]]
+        logits2.fill(indexes: indexes2, with: -FloatType.infinity)
+        XCTAssertEqual(logits2.data(for: 2), [-.infinity, -.infinity, 0.3, 0.4, 0.5, -.infinity, 0.7])
+    }
+
+    // MARK: - LogitsFilter Tests
+
+    func testSuppressTokensFilter() throws {
+        let tokensFilter1 = SuppressTokensFilter(suppressTokens: [])
+        let logits1 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let result1 = tokensFilter1.filterLogits(logits1, withTokens: [])
+        XCTAssertEqual(result1.data(for: 2), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+
+        let tokensFilter2 = SuppressTokensFilter(suppressTokens: [0])
+        let logits2 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let result2 = tokensFilter2.filterLogits(logits2, withTokens: [])
+        XCTAssertEqual(result2.data(for: 2), [-.infinity, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+
+        let tokensFilter3 = SuppressTokensFilter(suppressTokens: [0, 2, 5, 6])
+        let logits3 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let result3 = tokensFilter3.filterLogits(logits3, withTokens: [])
+        XCTAssertEqual(result3.data(for: 2), [-.infinity, 0.2, -.infinity, 0.4, 0.5, -.infinity, -.infinity])
+    }
+
+    func testSuppressBlankFilter() throws {
+        let tokensFilter1 = SuppressBlankFilter(suppressBlankTokens: [], sampleBegin: 0)
+        let logits1 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let result1 = tokensFilter1.filterLogits(logits1, withTokens: [])
+        XCTAssertEqual(result1.data(for: 2), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+
+        let tokensFilter2 = SuppressBlankFilter(suppressBlankTokens: [0], sampleBegin: 0)
+        let logits2 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let result2 = tokensFilter2.filterLogits(logits2, withTokens: [])
+        XCTAssertEqual(result2.data(for: 2), [-.infinity, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+
+        let tokensFilter3 = SuppressBlankFilter(suppressBlankTokens: [0, 2, 6], sampleBegin: 0)
+        let logits3 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let result3 = tokensFilter3.filterLogits(logits3, withTokens: [])
+        XCTAssertEqual(result3.data(for: 2), [-.infinity, 0.2, -.infinity, 0.4, 0.5, 0.6, -.infinity])
+
+        let tokensFilter4 = SuppressBlankFilter(suppressBlankTokens: [0, 2, 6], sampleBegin: 3)
+        let logits4 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let result4 = tokensFilter4.filterLogits(logits4, withTokens: [1, 2, 3])
+        XCTAssertEqual(result4.data(for: 2), [-.infinity, 0.2, -.infinity, 0.4, 0.5, 0.6, -.infinity])
+
+        let tokensFilter5 = SuppressBlankFilter(suppressBlankTokens: [0, 2, 6], sampleBegin: 5)
+        let logits5 = try MLMultiArray.logits([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        let result5 = tokensFilter5.filterLogits(logits5, withTokens: [1, 2, 3])
+        XCTAssertEqual(result5.data(for: 2), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+    }
 }
 
 // MARK: Helpers
 
-@available(macOS 14, iOS 17, *)
-func transcribe(with variant: ModelVariant, options: DecodingOptions, audioFile: String = "jfk.wav") async throws -> TranscriptionResult? {
-    var modelPath = tinyModelPath()
-    switch variant {
+extension MLMultiArray {
+    /// Create `MLMultiArray` of shape [1, 1, arr.count] and fill up the last
+    /// dimension with with values from arr.
+    static func logits(_ arr: [FloatType]) throws -> MLMultiArray {
+        let logits = try MLMultiArray(shape: [1, 1, arr.count] as [NSNumber], dataType: .float16)
+        let ptr = UnsafeMutablePointer<FloatType>(OpaquePointer(logits.dataPointer))
+        for (index, value) in arr.enumerated() {
+            let linearOffset = logits.linearOffset(for: [0, 0, index as NSNumber])
+            ptr[linearOffset] = value
+        }
+        return logits
+    }
+
+    /// Get the data from `MLMultiArray` for given dimension
+    func data(for dimension: Int) -> [FloatType] {
+        let count = shape[dimension].intValue
+        let indexes = stride(from: 0, to: count, by: 1).map { [0, 0, $0 as NSNumber] }
+        var result = [FloatType]()
+        let ptr = UnsafeMutablePointer<FloatType>(OpaquePointer(dataPointer))
+        for index in indexes {
+            let linearOffset = linearOffset(for: index as [NSNumber])
+            result.append(ptr[linearOffset])
+        }
+        return result
+    }
+}
+
+@available(macOS 14, iOS 17, watchOS 10, visionOS 1, *)
+extension XCTestCase {
+    func transcribe(with variant: ModelVariant, options: DecodingOptions, audioFile: String = "jfk.wav", file: StaticString = #file, line: UInt = #line) async throws -> TranscriptionResult? {
+        var modelPath = tinyModelPath()
+        switch variant {
         case .largev3:
             modelPath = largev3ModelPath()
         default:
             modelPath = tinyModelPath()
-    }
-    let whisperKit = try await WhisperKit(modelFolder: modelPath, verbose: true, logLevel: .debug)
+        }
+        let computeOptions = ModelComputeOptions(
+            melCompute: .cpuOnly,
+            audioEncoderCompute: .cpuOnly,
+            textDecoderCompute: .cpuOnly,
+            prefillCompute: .cpuOnly
+        )
+        let whisperKit = try await WhisperKit(modelFolder: modelPath, computeOptions: computeOptions, verbose: true, logLevel: .debug)
+        trackForMemoryLeaks(on: whisperKit, file: file, line: line)
 
-    let audioComponents = audioFile.components(separatedBy: ".")
-    guard let audioFileURL = Bundle.module.path(forResource: audioComponents.first, ofType: audioComponents.last) else {
-        return nil
-    }
-
-    let result = try await whisperKit.transcribe(audioPath: audioFileURL, decodeOptions: options)
-    return result
-}
-
-func tinyModelPath() -> String {
-    let modelDir = "whisperkit-coreml/openai_whisper-tiny"
-    guard let modelPath = Bundle.module.urls(forResourcesWithExtension: "mlmodelc", subdirectory: modelDir)?.first?.deletingLastPathComponent().absoluteString else {
-        print("Failed to load model, ensure \"Models/\(modelDir)\" exists via Makefile command: `make download-models`")
-        return ""
-    }
-    return modelPath
-}
-
-func largev3ModelPath() -> String {
-    let modelDir = "whisperkit-coreml/openai_whisper-large-v3" // use faster to compile model for tests
-    guard let modelPath = Bundle.module.urls(forResourcesWithExtension: "mlmodelc", subdirectory: modelDir)?.first?.deletingLastPathComponent().absoluteString else {
-        print("Failed to load model, ensure \"Models/\(modelDir)\" exists via Makefile command: `make download-models`")
-        return ""
-    }
-    return modelPath
-}
-
-func allModelPaths() -> [String] {
-    let fileManager = FileManager.default
-    var modelPaths: [String] = []
-    let directory = "whisperkit-coreml"
-
-    do {
-        let resourceKeys: [URLResourceKey] = [.isDirectoryKey]
-        guard let baseurl = Bundle.module.resourceURL?.appendingPathComponent(directory) else {
-            print("Base URL for directory \(directory) not found.")
-            return []
+        let audioComponents = audioFile.components(separatedBy: ".")
+        guard let audioFileURL = Bundle.module.path(forResource: audioComponents.first, ofType: audioComponents.last) else {
+            return nil
         }
 
-        let directoryContents = try fileManager.contentsOfDirectory(at: baseurl, includingPropertiesForKeys: resourceKeys, options: .skipsHiddenFiles)
+        let result = try await whisperKit.transcribe(audioPath: audioFileURL, decodeOptions: options)
+        return result
+    }
 
-        for folderURL in directoryContents {
-            let resourceValues = try folderURL.resourceValues(forKeys: Set(resourceKeys))
-            if resourceValues.isDirectory == true {
-                // Check if the directory name contains the quantization pattern
-                // Only test large quantized models
-                let dirName = folderURL.lastPathComponent
-                if !(dirName.contains("q") && !dirName.contains("large")) {
-                    modelPaths.append(folderURL.absoluteString)
+    func tinyModelPath() -> String {
+        let modelDir = "whisperkit-coreml/openai_whisper-tiny"
+        guard let modelPath = Bundle.module.urls(forResourcesWithExtension: "mlmodelc", subdirectory: modelDir)?.first?.deletingLastPathComponent().path else {
+            print("Failed to load model, ensure \"Models/\(modelDir)\" exists via Makefile command: `make download-models`")
+            return ""
+        }
+        return modelPath
+    }
+
+    func largev3ModelPath() -> String {
+        let modelDir = "whisperkit-coreml/openai_whisper-large-v3" // use faster to compile model for tests
+        guard let modelPath = Bundle.module.urls(forResourcesWithExtension: "mlmodelc", subdirectory: modelDir)?.first?.deletingLastPathComponent().path else {
+            print("Failed to load model, ensure \"Models/\(modelDir)\" exists via Makefile command: `make download-models`")
+            return ""
+        }
+        return modelPath
+    }
+
+    func allModelPaths() -> [String] {
+        let fileManager = FileManager.default
+        var modelPaths: [String] = []
+        let directory = "whisperkit-coreml"
+
+        do {
+            let resourceKeys: [URLResourceKey] = [.isDirectoryKey]
+            guard let baseurl = Bundle.module.resourceURL?.appendingPathComponent(directory) else {
+                print("Base URL for directory \(directory) not found.")
+                return []
+            }
+
+            let directoryContents = try fileManager.contentsOfDirectory(at: baseurl, includingPropertiesForKeys: resourceKeys, options: .skipsHiddenFiles)
+
+            for folderURL in directoryContents {
+                let resourceValues = try folderURL.resourceValues(forKeys: Set(resourceKeys))
+                if resourceValues.isDirectory == true {
+                    // Check if the directory name contains the quantization pattern
+                    // Only test large quantized models
+                    let dirName = folderURL.lastPathComponent
+                    if !(dirName.contains("q") && !dirName.contains("large")) {
+                        modelPaths.append(folderURL.absoluteString)
+                    }
                 }
             }
+        } catch {
+            print(error.localizedDescription)
         }
-    } catch {
-        print(error.localizedDescription)
+
+        return modelPaths
     }
 
-    return modelPaths
+    func trackForMemoryLeaks(on instance: AnyObject, file: StaticString = #filePath, line: UInt = #line) {
+        addTeardownBlock { [weak instance] in
+            XCTAssertNil(instance, "Detected potential memory leak", file: file, line: line)
+        }
+    }
 }
 
 extension String {
@@ -538,8 +642,3 @@ extension String {
         return singleSpacedString
     }
 }
-
-
-
-
-

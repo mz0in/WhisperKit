@@ -8,9 +8,9 @@
 import SwiftUI
 import WhisperKit
 #if canImport(UIKit)
-import UIKit
+    import UIKit
 #elseif canImport(AppKit)
-import AppKit
+    import AppKit
 #endif
 import AVFoundation
 
@@ -46,7 +46,6 @@ struct ContentView: View {
     @AppStorage("silenceThreshold") private var silenceThreshold: Double = 0.3
     @AppStorage("useVAD") private var useVAD: Bool = true
 
-
     @State private var loadingProgressValue: Float = 0.0
     @State private var specializationProgressRatio: Float = 0.7
     @State private var isFilePickerPresented = false
@@ -64,14 +63,13 @@ struct ContentView: View {
     @State private var unconfirmedSegments: [TranscriptionSegment] = []
     @State private var unconfirmedText: [String] = []
 
-
     @State private var showAdvancedOptions: Bool = false
     @State private var transcriptionTask: Task<Void, Never>? = nil
 
     @State private var selectedCategoryId: MenuItem.ID?
     private var menu = [
         MenuItem(name: "Transcribe", image: "book.pages"),
-        MenuItem(name: "Stream", image: "waveform.badge.mic")
+        MenuItem(name: "Stream", image: "waveform.badge.mic"),
     ]
 
     struct MenuItem: Identifiable, Hashable {
@@ -151,17 +149,15 @@ struct ContentView: View {
                     .frame(minWidth: 0, maxWidth: .infinity)
                 }
             })
-
         }
         .onAppear {
             Task {
                 whisperKit = try await WhisperKit(verbose: true, logLevel: .debug)
             }
 
-#if os(macOS)
-            selectedCategoryId = menu.first(where: { $0.name == selectedTab })?.id
-#endif
-
+            #if os(macOS)
+                selectedCategoryId = menu.first(where: { $0.name == selectedTab })?.id
+            #endif
             fetchModels()
         }
     }
@@ -173,7 +169,7 @@ struct ContentView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 1) {
                     let startIndex = max(bufferEnergy.count - 300, 0)
-                    ForEach(Array(bufferEnergy.enumerated())[startIndex...], id: \.offset) { index, energy in
+                    ForEach(Array(bufferEnergy.enumerated())[startIndex...], id: \.element) { _, energy in
                         ZStack {
                             RoundedRectangle(cornerRadius: 2)
                                 .frame(width: 2, height: CGFloat(energy) * 24)
@@ -187,7 +183,7 @@ struct ContentView: View {
             .frame(height: 24)
             .scrollIndicators(.never)
             ScrollView {
-                VStack(alignment: .leading) {  // Ensure alignment is set to .leading
+                VStack(alignment: .leading) {
                     ForEach(Array(confirmedSegments.enumerated()), id: \.element) { _, segment in
                         let timestampText = enableTimestamps ? "[\(String(format: "%.2f", segment.start)) --> \(String(format: "%.2f", segment.end))]" : ""
                         Text(timestampText + segment.text)
@@ -197,7 +193,7 @@ struct ContentView: View {
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    ForEach(Array(unconfirmedSegments.enumerated()), id: \.element) { index, segment in
+                    ForEach(Array(unconfirmedSegments.enumerated()), id: \.element) { _, segment in
                         let timestampText = enableTimestamps ? "[\(String(format: "%.2f", segment.start)) --> \(String(format: "%.2f", segment.end))]" : ""
                         Text(timestampText + segment.text)
                             .font(.headline)
@@ -205,12 +201,12 @@ struct ContentView: View {
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    Text("\(unconfirmedText.joined(separator: "\n"))" )
+                    Text("\(unconfirmedText.joined(separator: "\n"))")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("\(currentText)" )
+                    Text("\(currentText)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
@@ -255,22 +251,22 @@ struct ContentView: View {
                             .scaleEffect(0.5)
                     }
 
-#if os(macOS)
-                    Button(action: {
-                        if let folder = whisperKit?.modelFolder {
-                            NSWorkspace.shared.open(folder)
-                        }
-                    }, label: {
-                        Image(systemName: "folder")
-                    })
-                    .buttonStyle(BorderlessButtonStyle())
-#endif
+                    #if os(macOS)
+                        Button(action: {
+                            if let folder = whisperKit?.modelFolder {
+                                NSWorkspace.shared.open(folder)
+                            }
+                        }, label: {
+                            Image(systemName: "folder")
+                        })
+                        .buttonStyle(BorderlessButtonStyle())
+                    #endif
                     Button(action: {
                         if let url = URL(string: "https://huggingface.co/\(repoName)") {
                             #if os(macOS)
-                            NSWorkspace.shared.open(url)
+                                NSWorkspace.shared.open(url)
                             #else
-                            UIApplication.shared.open(url)
+                                UIApplication.shared.open(url)
                             #endif
                         }
                     }, label: {
@@ -296,7 +292,7 @@ struct ContentView: View {
                         HStack {
                             ProgressView(value: loadingProgressValue, total: 1.0)
                                 .progressViewStyle(LinearProgressViewStyle())
-                                .frame(maxWidth: .infinity)  // This makes the progress bar expand to fill the available width
+                                .frame(maxWidth: .infinity)
 
                             Text(String(format: "%.1f%%", loadingProgressValue * 100))
                                 .font(.caption)
@@ -498,20 +494,20 @@ struct ContentView: View {
     }
 
     var advancedSettingsView: some View {
-#if os(iOS)
-        NavigationView {
-            settingsForm
-                .navigationBarTitleDisplayMode(.inline)
-        }
-#else
-        VStack {
-            Text("Decoding Options")
-                .font(.title2)
-                .padding()
-            settingsForm
-                .frame(minWidth: 500, minHeight: 500)
-        }
-#endif
+        #if os(iOS)
+            NavigationView {
+                settingsForm
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        #else
+            VStack {
+                Text("Decoding Options")
+                    .font(.title2)
+                    .padding()
+                settingsForm
+                    .frame(minWidth: 500, minHeight: 500)
+            }
+        #endif
     }
 
     var settingsForm: some View {
@@ -521,7 +517,6 @@ struct ContentView: View {
                 InfoButton("Toggling this will include/exclude timestamps in both the UI and the prefill tokens.\nEither <|notimestamps|> or <|0.00|> will be forced based on this setting unless \"Prompt Prefill\" is de-selected.")
                 Spacer()
                 Toggle("", isOn: $enableTimestamps)
-
             }
             .padding(.horizontal)
 
@@ -602,7 +597,6 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal)
-
         }
         .navigationTitle("Decoding Options")
         .toolbar(content: {
@@ -664,7 +658,13 @@ struct ContentView: View {
         }
 
         localModels = WhisperKit.formatModelFiles(localModels)
-        availableModels = localModels
+        for model in localModels {
+            if !availableModels.contains(model),
+               !disabledModels.contains(model)
+            {
+                availableModels.append(model)
+            }
+        }
 
         print("Found locally: \(localModels)")
         print("Previously selected model: \(selectedModel)")
@@ -673,7 +673,8 @@ struct ContentView: View {
             let remoteModels = try await WhisperKit.fetchAvailableModels(from: repoName)
             for model in remoteModels {
                 if !availableModels.contains(model),
-                   !disabledModels.contains(model){
+                   !disabledModels.contains(model)
+                {
                     availableModels.append(model)
                 }
             }
@@ -684,23 +685,23 @@ struct ContentView: View {
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
 
         switch microphoneStatus {
-            case .notDetermined:
-                return await withCheckedContinuation { continuation in
-                    AVCaptureDevice.requestAccess(for: .audio) { granted in
-                        continuation.resume(returning: granted)
-                    }
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted)
                 }
-            case .restricted, .denied:
-                print("Microphone access denied")
-                return false
-            case .authorized:
-                return true
-            @unknown default:
-                fatalError("Unknown authorization status")
+            }
+        case .restricted, .denied:
+            print("Microphone access denied")
+            return false
+        case .authorized:
+            return true
+        @unknown default:
+            fatalError("Unknown authorization status")
         }
     }
 
-    func loadModel(_ model: String) {
+    func loadModel(_ model: String, redownload: Bool = false) {
         print("Selected Model: \(UserDefaults.standard.string(forKey: "selectedModel") ?? "nil")")
 
         whisperKit = nil
@@ -708,7 +709,9 @@ struct ContentView: View {
             whisperKit = try await WhisperKit(
                 verbose: true,
                 logLevel: .debug,
-                prewarm: false
+                prewarm: false,
+                load: false,
+                download: false
             )
             guard let whisperKit = whisperKit else {
                 return
@@ -717,13 +720,13 @@ struct ContentView: View {
             var folder: URL?
 
             // Check if the model is available locally
-            if localModels.contains(model) {
+            if localModels.contains(model) && !redownload {
                 // Get local model folder URL from localModels
                 // TODO: Make this configurable in the UI
                 folder = URL(fileURLWithPath: localModelPath).appendingPathComponent("openai_whisper-\(model)")
             } else {
                 // Download the model
-                folder = try await WhisperKit.load(variant: model, from: repoName, progressCallback: { progress in
+                folder = try await WhisperKit.download(variant: model, from: repoName, progressCallback: { progress in
                     DispatchQueue.main.async {
                         loadingProgressValue = Float(progress.fractionCompleted) * specializationProgressRatio
                         modelState = .downloading
@@ -745,8 +748,21 @@ struct ContentView: View {
                 }
 
                 // Prewarm models
-                try await whisperKit.prewarmModels()
-                progressBarTask.cancel()
+                do {
+                    try await whisperKit.prewarmModels()
+                    progressBarTask.cancel()
+                } catch {
+                    print("Error prewarming models, retrying: \(error.localizedDescription)")
+                    progressBarTask.cancel()
+                    if !redownload {
+                        loadModel(model, redownload: true)
+                        return
+                    } else {
+                        // Redownloading failed, error out
+                        modelState = .unloaded
+                        return
+                    }
+                }
 
                 await MainActor.run {
                     // Set the loading progress to 90% of the way after prewarm
@@ -801,32 +817,32 @@ struct ContentView: View {
 
     func handleFilePicker(result: Result<[URL], Error>) {
         switch result {
-            case .success(let urls):
-                guard let selectedFileURL = urls.first else { return }
-                if selectedFileURL.startAccessingSecurityScopedResource() {
-                    do {
-                        // Access the document data from the file URL
-                        let audioFileData = try Data(contentsOf: selectedFileURL)
+        case let .success(urls):
+            guard let selectedFileURL = urls.first else { return }
+            if selectedFileURL.startAccessingSecurityScopedResource() {
+                do {
+                    // Access the document data from the file URL
+                    let audioFileData = try Data(contentsOf: selectedFileURL)
 
-                        // Create a unique file name to avoid overwriting any existing files
-                        let uniqueFileName = UUID().uuidString + "." + selectedFileURL.pathExtension
+                    // Create a unique file name to avoid overwriting any existing files
+                    let uniqueFileName = UUID().uuidString + "." + selectedFileURL.pathExtension
 
-                        // Construct the temporary file URL in the app's temp directory
-                        let tempDirectoryURL = FileManager.default.temporaryDirectory
-                        let localFileURL = tempDirectoryURL.appendingPathComponent(uniqueFileName)
+                    // Construct the temporary file URL in the app's temp directory
+                    let tempDirectoryURL = FileManager.default.temporaryDirectory
+                    let localFileURL = tempDirectoryURL.appendingPathComponent(uniqueFileName)
 
-                        // Write the data to the temp directory
-                        try audioFileData.write(to: localFileURL)
+                    // Write the data to the temp directory
+                    try audioFileData.write(to: localFileURL)
 
-                        print("File saved to temporary directory: \(localFileURL)")
+                    print("File saved to temporary directory: \(localFileURL)")
 
-                        transcribeFile(path: selectedFileURL.path)
-                    } catch {
-                        print("File selection error: \(error.localizedDescription)")
-                    }
+                    transcribeFile(path: selectedFileURL.path)
+                } catch {
+                    print("File selection error: \(error.localizedDescription)")
                 }
-            case .failure(let error):
-                print("File selection error: \(error.localizedDescription)")
+            }
+        case let .failure(error):
+            print("File selection error: \(error.localizedDescription)")
         }
     }
 
@@ -861,7 +877,7 @@ struct ContentView: View {
                     return
                 }
 
-                try? audioProcessor.startRecordingLive { buffer in
+                try? audioProcessor.startRecordingLive { _ in
                     DispatchQueue.main.async {
                         bufferEnergy = whisperKit?.audioProcessor.relativeEnergy ?? []
                     }
@@ -894,7 +910,6 @@ struct ContentView: View {
                 }
             }
         }
-
     }
 
     // MARK: Transcribe Logic
@@ -943,7 +958,6 @@ struct ContentView: View {
             withoutTimestamps: !enableTimestamps,
             clipTimestamps: seekClip
         )
-
 
         // Early stopping checks
         let decodingCallback: ((TranscriptionProgress) -> Bool?) = { progress in
@@ -1067,7 +1081,6 @@ struct ContentView: View {
         // Run transcribe
         lastBufferSize = currentBuffer.count
 
-
         let transcription = try await transcribeAudioSamples(Array(currentBuffer))
 
         // We need to run this next part on the main thread
@@ -1115,7 +1128,7 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-#if os(macOS)
+    #if os(macOS)
         .frame(width: 800, height: 500)
-#endif
+    #endif
 }

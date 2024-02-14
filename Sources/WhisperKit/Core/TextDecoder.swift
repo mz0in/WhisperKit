@@ -5,7 +5,7 @@ import Accelerate
 import CoreML
 import Tokenizers
 
-@available(macOS 14, iOS 17, tvOS 14, watchOS 10, *)
+@available(macOS 14, iOS 17, watchOS 10, visionOS 1, *)
 public protocol TextDecoding {
     var tokenizer: Tokenizer? { get set }
     var prefillData: WhisperMLModel? { get set }
@@ -43,9 +43,9 @@ public protocol TextDecoding {
     )
 }
 
-@available(macOS 14, iOS 17, tvOS 14, watchOS 10, *)
+@available(macOS 14, iOS 17, watchOS 10, visionOS 1, *)
 public extension TextDecoding {
-    func prepareDecoderInputs(withPrompt initialPrompt: [Int]) -> DecodingInputs {
+    func prepareDecoderInputs(withPrompt initialPrompt: [Int]) -> DecodingInputs? {
         let tokenShape = [NSNumber(value: 1), NSNumber(value: initialPrompt.count)]
 
         // Initialize MLMultiArray for tokens
@@ -59,11 +59,13 @@ public extension TextDecoding {
         }
 
         guard let kvCacheEmbedDim = self.kvCacheEmbedDim else {
-            fatalError("Unable to determine kvCacheEmbedDim")
+            Logging.error("Unable to determine kvCacheEmbedDim")
+            return nil
         }
 
         guard let kvCacheMaxSequenceLength = self.kvCacheMaxSequenceLength else {
-            fatalError("Unable to determine kvCacheMaxSequenceLength")
+            Logging.error("Unable to determine kvCacheMaxSequenceLength")
+            return nil
         }
 
         // Initialize each MLMultiArray
@@ -221,7 +223,7 @@ public class TextDecoderContextPrefill: WhisperMLModel {
     public var model: MLModel?
 }
 
-@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+@available(macOS 14, iOS 17, watchOS 10, visionOS 1, *)
 public class TextDecoder: TextDecoding, WhisperMLModel {
     public var model: MLModel?
     public var tokenizer: Tokenizer?
@@ -326,12 +328,15 @@ public class TextDecoder: TextDecoding, WhisperMLModel {
 
         var logitsFilters: [any LogitsFiltering] = []
         if options.suppressBlank {
-            // TODO: implement
-            logitsFilters.append(SuppressBlankFilter(tokenizer: tokenizer, sampleBegin: prefilledIndex))
+            logitsFilters.append(
+                SuppressBlankFilter(
+                    suppressBlankTokens: [tokenizer.whitespaceToken, tokenizer.endToken],
+                    sampleBegin: prefilledIndex
+                )
+            )
         }
 
         if !options.supressTokens.isEmpty {
-            // TODO: implement
             logitsFilters.append(SuppressTokensFilter(suppressTokens: options.supressTokens))
         }
 
